@@ -1,0 +1,5 @@
+certs
+tickets.md
+backend_fastapi/__pycache__
+backend_fastapi/manifests
+frontend_nodejs/manifests
