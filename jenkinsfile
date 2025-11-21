@@ -8,22 +8,22 @@ kind: Pod
 spec:
   containers:
     - name: docker
-      image: docker:27.0.3
-      command: ['cat']
+      image: docker:27.0.3-dind
+      securityContext:
+        privileged: true
+      env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+      command: ['dockerd-entrypoint.sh']
+      args: ['--host=tcp://0.0.0.0:2375', '--host=unix:///var/run/docker.sock']
+      ports:
+        - containerPort: 2375
       tty: true
-      volumeMounts:
-        - name: dockersock
-          mountPath: /var/run/docker.sock
 
     - name: tools
       image: dtzar/helm-kubectl:3.16.2
       command: ['cat']
       tty: true
-
-  volumes:
-    - name: dockersock
-      hostPath:
-        path: /var/run/docker.sock
 """
         }
     }
@@ -38,13 +38,15 @@ spec:
 
         stage('Build Backend Image') {
             steps {
-                container('docker'){  
-                    dir('backend_fastapi') {
-                        script {
-                            app_backend = docker.build(
-                                "${BACKEND_IMAGE}:${BUILD_NUMBER}",
-                                "--file Dockerfile ."      
-                            )
+                container('docker') {
+                    script {
+                        docker.withServer("tcp://localhost:2375") {
+                            dir('backend_fastapi') {
+                                app_backend = docker.build(
+                                    "${BACKEND_IMAGE}:${BUILD_NUMBER}",
+                                    "--file Dockerfile ."
+                                )
+                            }
                         }
                     }
                 }
@@ -53,13 +55,15 @@ spec:
 
         stage('Build Frontend Image') {
             steps {
-                container('docker'){
-                    dir('frontend_nodejs/frontend') {          
-                        script {
-                            app_frontend = docker.build(
-                                "${FRONTEND_IMAGE}:${BUILD_NUMBER}",
-                                "--file Dockerfile ."          
-                            )
+                container('docker') {
+                    script {
+                        docker.withServer("tcp://localhost:2375") {
+                            dir('frontend_nodejs/frontend') {
+                                app_frontend = docker.build(
+                                    "${FRONTEND_IMAGE}:${BUILD_NUMBER}",
+                                    "--file Dockerfile ."
+                                )
+                            }
                         }
                     }
                 }
@@ -68,15 +72,17 @@ spec:
 
         stage('Push Images to Docker Hub') {
             steps {
-                container('docker'){
+                container('docker') {
                     script {
-                        docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
+                        docker.withServer("tcp://localhost:2375") {
+                            docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
 
-                            app_backend.push("${BUILD_NUMBER}")
-                            app_backend.push("latest")
+                                app_backend.push("${BUILD_NUMBER}")
+                                app_backend.push("latest")
 
-                            app_frontend.push("${BUILD_NUMBER}")
-                            app_frontend.push("latest")
+                                app_frontend.push("${BUILD_NUMBER}")
+                                app_frontend.push("latest")
+                            }
                         }
                     }
                 }
@@ -85,7 +91,7 @@ spec:
 
         stage('Deploy to Kubernetes via Helm') {
             steps {
-                container('tools'){
+                container('tools') {
                     sh '''
                         kubectl get ns ${NAMESPACE} || kubectl create ns ${NAMESPACE}
 
