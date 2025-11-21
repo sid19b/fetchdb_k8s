@@ -7,18 +7,14 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
-    - name: docker
-      image: docker:27.0.3-dind
-      securityContext:
-        privileged: true
-      env:
-        - name: DOCKER_TLS_CERTDIR
-          value: ""
-      command: ['dockerd-entrypoint.sh']
-      args: ['--host=tcp://0.0.0.0:2375', '--host=unix:///var/run/docker.sock']
-      ports:
-        - containerPort: 2375
+    - name: podman
+      image: quay.io/podman/stable
+      command: ['cat']
       tty: true
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        allowPrivilegeEscalation: false
 
     - name: tools
       image: dtzar/helm-kubectl:3.16.2
@@ -31,86 +27,90 @@ spec:
     environment {
         BACKEND_IMAGE = "siddharth19b/fastapi_backend"
         FRONTEND_IMAGE = "siddharth19b/frontend_k8s"
-        NAMESPACE = "frontend"
+        NAMESPACE     = "frontend"
     }
 
     stages {
 
+        /* ---------------------------
+             BUILD BACKEND IMAGE
+        ---------------------------- */
         stage('Build Backend Image') {
             steps {
-                container('docker') {
-                    script {
-                        docker.withServer("tcp://localhost:2375") {
-                            dir('backend_fastapi') {
-                                app_backend = docker.build(
-                                    "${BACKEND_IMAGE}:${BUILD_NUMBER}",
-                                    "--file Dockerfile ."
-                                )
-                            }
-                        }
+                container('podman') {
+                    dir('backend_fastapi') {
+                        sh """
+                        podman build -t ${BACKEND_IMAGE}:${BUILD_NUMBER} .
+                        """
                     }
                 }
             }
         }
 
+        /* ---------------------------
+             BUILD FRONTEND IMAGE
+        ---------------------------- */
         stage('Build Frontend Image') {
             steps {
-                container('docker') {
-                    script {
-                        docker.withServer("tcp://localhost:2375") {
-                            dir('frontend_nodejs/frontend') {
-                                app_frontend = docker.build(
-                                    "${FRONTEND_IMAGE}:${BUILD_NUMBER}",
-                                    "--file Dockerfile ."
-                                )
-                            }
-                        }
+                container('podman') {
+                    dir('frontend_nodejs/frontend') {
+                        sh """
+                        podman build -t ${FRONTEND_IMAGE}:${BUILD_NUMBER} .
+                        """
                     }
                 }
             }
         }
 
+        /* ---------------------------
+             PUSH IMAGES TO DOCKER HUB
+        ---------------------------- */
         stage('Push Images to Docker Hub') {
             steps {
-                container('docker') {
-                    script {
-                        docker.withServer("tcp://localhost:2375") {
-                            docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
+                container('podman') {
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub',
+                                                      usernameVariable: 'USER',
+                                                      passwordVariable: 'PASS')]) {
+                        sh """
+                        podman login -u $USER -p $PASS docker.io
 
-                                app_backend.push("${BUILD_NUMBER}")
-                                app_backend.push("latest")
+                        podman push ${BACKEND_IMAGE}:${BUILD_NUMBER}
+                        podman tag  ${BACKEND_IMAGE}:${BUILD_NUMBER} ${BACKEND_IMAGE}:latest
+                        podman push ${BACKEND_IMAGE}:latest
 
-                                app_frontend.push("${BUILD_NUMBER}")
-                                app_frontend.push("latest")
-                            }
-                        }
+                        podman push ${FRONTEND_IMAGE}:${BUILD_NUMBER}
+                        podman tag  ${FRONTEND_IMAGE}:${BUILD_NUMBER} ${FRONTEND_IMAGE}:latest
+                        podman push ${FRONTEND_IMAGE}:latest
+                        """
                     }
                 }
             }
         }
 
+        /* ---------------------------
+             DEPLOY USING HELM
+        ---------------------------- */
         stage('Deploy to Kubernetes via Helm') {
             steps {
                 container('tools') {
-                    sh '''
-                        kubectl get ns ${NAMESPACE} || kubectl create ns ${NAMESPACE}
+                    sh """
+                    kubectl get ns ${NAMESPACE} || kubectl create ns ${NAMESPACE}
 
-                        cd backend_fastapi/backend-chart
-                        helm upgrade --install backend . \
-                            -n ${NAMESPACE} \
-                            --set image.repository=${BACKEND_IMAGE} \
-                            --set image.tag=${BUILD_NUMBER} \
-                            -f ../values.yaml
+                    cd backend_fastapi/backend-chart
+                    helm upgrade --install backend . \
+                        -n ${NAMESPACE} \
+                        --set image.repository=${BACKEND_IMAGE} \
+                        --set image.tag=${BUILD_NUMBER}
 
-                        cd ../../frontend_nodejs/frontend-chart
-                        helm upgrade --install frontend . \
-                            -n ${NAMESPACE} \
-                            --set image.repository=${FRONTEND_IMAGE} \
-                            --set image.tag=${BUILD_NUMBER} \
-                            -f ../values.yaml
-                    '''
+                    cd ../../frontend_nodejs/frontend-chart
+                    helm upgrade --install frontend . \
+                        -n ${NAMESPACE} \
+                        --set image.repository=${FRONTEND_IMAGE} \
+                        --set image.tag=${BUILD_NUMBER}
+                    """
                 }
             }
         }
+
     }
 }
