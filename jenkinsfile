@@ -37,13 +37,13 @@ spec:
     stages {
 
         stage('Build Backend Image') {
-            container('tools'){
-                steps {
+            steps {
+                container('docker'){  
                     dir('backend_fastapi') {
                         script {
                             app_backend = docker.build(
                                 "${BACKEND_IMAGE}:${BUILD_NUMBER}",
-                                "--file backend_fastapi/Dockerfile"
+                                "--file Dockerfile ."      
                             )
                         }
                     }
@@ -54,11 +54,11 @@ spec:
         stage('Build Frontend Image') {
             steps {
                 container('docker'){
-                    dir('frontend_nodejs') {
+                    dir('frontend_nodejs/frontend') {          
                         script {
                             app_frontend = docker.build(
                                 "${FRONTEND_IMAGE}:${BUILD_NUMBER}",
-                                "--file frontend_nodejs/frontend/Dockerfile"
+                                "--file Dockerfile ."          
                             )
                         }
                     }
@@ -68,19 +68,18 @@ spec:
 
         stage('Push Images to Docker Hub') {
             steps {
-            container('docker'){
-                script {
-                    docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
-                        // Backend
-                        app_backend.push("${BUILD_NUMBER}")
-                        app_backend.push("latest")
+                container('docker'){
+                    script {
+                        docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
 
-                        // Frontend
-                        app_frontend.push("${BUILD_NUMBER}")
-                        app_frontend.push("latest")
+                            app_backend.push("${BUILD_NUMBER}")
+                            app_backend.push("latest")
+
+                            app_frontend.push("${BUILD_NUMBER}")
+                            app_frontend.push("latest")
+                        }
                     }
                 }
-             }
             }
         }
 
@@ -88,22 +87,21 @@ spec:
             steps {
                 container('tools'){
                     sh '''
-                        # Create namespace if not exists
                         kubectl get ns ${NAMESPACE} || kubectl create ns ${NAMESPACE}
 
-                        cd backend_fastapi
-                        helm upgrade --install backend backend-chart \
+                        cd backend_fastapi/backend-chart
+                        helm upgrade --install backend . \
                             -n ${NAMESPACE} \
                             --set image.repository=${BACKEND_IMAGE} \
                             --set image.tag=${BUILD_NUMBER} \
-                            -f values.yaml
+                            -f ../values.yaml
 
-                        cd ../frontend_nodejs
-                        helm upgrade --install frontend frontend-chart \
+                        cd ../../frontend_nodejs/frontend-chart
+                        helm upgrade --install frontend . \
                             -n ${NAMESPACE} \
                             --set image.repository=${FRONTEND_IMAGE} \
                             --set image.tag=${BUILD_NUMBER} \
-                            -f values.yaml
+                            -f ../values.yaml
                     '''
                 }
             }
