@@ -12,14 +12,19 @@ spec:
       command: ['cat']
       tty: true
       securityContext:
-        runAsUser: 1000
-        runAsGroup: 1000
-        allowPrivilegeEscalation: false
+        privileged: true
+      volumeMounts:
+        - name: storage
+          mountPath: /var/lib/containers
 
     - name: tools
       image: dtzar/helm-kubectl:3.16.2
       command: ['cat']
       tty: true
+      
+  volumes:
+  - name: storage
+    emptyDir: {}
 """
         }
     }
