@@ -2,24 +2,29 @@ pipeline {
     agent {
         kubernetes {
             label "cicd-agent"
-            yaml '''
+            yaml """
 apiVersion: v1
 kind: Pod
 spec:
   containers:
-    - name: build
-      image: dtzar/helm-kubectl:3.16.2
-      command:
-        - cat
+    - name: docker
+      image: docker:27.0.3-cli
+      command: ['cat']
       tty: true
       volumeMounts:
         - name: dockersock
           mountPath: /var/run/docker.sock
+
+    - name: tools
+      image: dtzar/helm-kubectl:3.16.2
+      command: ['cat']
+      tty: true
+
   volumes:
     - name: dockersock
       hostPath:
         path: /var/run/docker.sock
-'''
+"""
         }
     }
 
@@ -32,13 +37,15 @@ spec:
     stages {
 
         stage('Build Backend Image') {
-            steps {
-                dir('backend_fastapi') {
-                    script {
-                        app_backend = docker.build(
-                            "${BACKEND_IMAGE}:${BUILD_NUMBER}",
-                            "--file backend_fastapi/Dockerfile"
-                        )
+            container('tools'){
+                steps {
+                    dir('backend_fastapi') {
+                        script {
+                            app_backend = docker.build(
+                                "${BACKEND_IMAGE}:${BUILD_NUMBER}",
+                                "--file backend_fastapi/Dockerfile"
+                            )
+                        }
                     }
                 }
             }
@@ -46,12 +53,14 @@ spec:
 
         stage('Build Frontend Image') {
             steps {
-                dir('frontend_nodejs') {
-                    script {
-                        app_frontend = docker.build(
-                            "${FRONTEND_IMAGE}:${BUILD_NUMBER}",
-                            "--file frontend_nodejs/frontend/Dockerfile"
-                        )
+                container('docker'){
+                    dir('frontend_nodejs') {
+                        script {
+                            app_frontend = docker.build(
+                                "${FRONTEND_IMAGE}:${BUILD_NUMBER}",
+                                "--file frontend_nodejs/frontend/Dockerfile"
+                            )
+                        }
                     }
                 }
             }
@@ -59,6 +68,7 @@ spec:
 
         stage('Push Images to Docker Hub') {
             steps {
+            container('docker'){
                 script {
                     docker.withRegistry('https://registry.hub.docker.com', 'dockerhub') {
                         // Backend
@@ -70,29 +80,32 @@ spec:
                         app_frontend.push("latest")
                     }
                 }
+             }
             }
         }
 
         stage('Deploy to Kubernetes via Helm') {
             steps {
-                sh '''
-                    # Create namespace if not exists
-                    kubectl get ns ${NAMESPACE} || kubectl create ns ${NAMESPACE}
+                container('tools'){
+                    sh '''
+                        # Create namespace if not exists
+                        kubectl get ns ${NAMESPACE} || kubectl create ns ${NAMESPACE}
 
-                    cd backend_fastapi
-                    helm upgrade --install backend backend-chart \
-                        -n ${NAMESPACE} \
-                        --set image.repository=${BACKEND_IMAGE} \
-                        --set image.tag=${BUILD_NUMBER} \
-                        -f values.yaml
+                        cd backend_fastapi
+                        helm upgrade --install backend backend-chart \
+                            -n ${NAMESPACE} \
+                            --set image.repository=${BACKEND_IMAGE} \
+                            --set image.tag=${BUILD_NUMBER} \
+                            -f values.yaml
 
-                    cd ../frontend_nodejs
-                    helm upgrade --install frontend frontend-chart \
-                        -n ${NAMESPACE} \
-                        --set image.repository=${FRONTEND_IMAGE} \
-                        --set image.tag=${BUILD_NUMBER} \
-                        -f values.yaml
-                '''
+                        cd ../frontend_nodejs
+                        helm upgrade --install frontend frontend-chart \
+                            -n ${NAMESPACE} \
+                            --set image.repository=${FRONTEND_IMAGE} \
+                            --set image.tag=${BUILD_NUMBER} \
+                            -f values.yaml
+                    '''
+                }
             }
         }
     }
