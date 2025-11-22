@@ -96,27 +96,35 @@ spec:
         /* ---------------------------
              DEPLOY USING HELM
         ---------------------------- */
-        stage('Deploy to Kubernetes via Helm') {
+        stage('Deploy to Kubernetes via Helm backend') {
             steps {
                 container('tools') {
-                    sh """
-                    kubectl get ns ${NAMESPACE} || kubectl create ns ${NAMESPACE}
-
-                    cd backend_fastapi/backend-chart
-                    helm upgrade --install backend . \
-                        -n ${NAMESPACE} \
-                        --set image.repository=${BACKEND_IMAGE} \
-                        --set image.tag=${BUILD_NUMBER}
-
-                    cd ../../frontend_nodejs/frontend-chart
-                    helm upgrade --install frontend . \
-                        -n ${NAMESPACE} \
-                        --set image.repository=${FRONTEND_IMAGE} \
-                        --set image.tag=${BUILD_NUMBER}
-                    """
+                    dir('backend_fastapi') {
+                        sh """
+                            helm upgrade --install backend backend-chart \
+                                -n ${NAMESPACE} \
+                                --set image.repository=${BACKEND_IMAGE} \
+                                --set image.tag=${BUILD_NUMBER} \
+                                -f values.yaml
+                            """
+                    }
                 }
             }
         }
-
+        stage('Deploy to Kubernetes via Helm frontend') {
+            steps {
+                container('tools') {
+                    dir('frontend_nodejs/frontend') {
+                        sh """
+                            helm upgrade --install frontend frontend-chart \
+                                -n ${NAMESPACE} \
+                                --set image.repository=${FRONTEND_IMAGE} \
+                                --set image.tag=${BUILD_NUMBER} \
+                                -f values.yaml
+                            """
+                    }
+                }
+            }
+        }
     }
 }
