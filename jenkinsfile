@@ -39,6 +39,7 @@ spec:
 
     parameters{
         choice(name: 'environment_params', choices: ['sandbox', 'QA', 'prod'], description: 'Pick a choice for deploying in environment. (First value is always the default).')
+        booleanParam(name: 'DEPLOY', defaultValue: false, description: 'Deploy the app?')
     }
 
     stages {
@@ -77,6 +78,7 @@ spec:
              BUILD BACKEND IMAGE
         ---------------------------- */
         stage('Build Backend Image') {
+            when { expression { params.DEPLOY == true} }
             steps {
                 container('podman') {
                     dir('backend_fastapi') {
