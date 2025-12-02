@@ -36,7 +36,28 @@ spec:
         NAMESPACE     = "frontend"
     }
 
+
+    parameters{
+        choice(name: 'environment_params', choices: ['sandbox', 'QA', 'prod'], description: 'Pick a choice for deploying in environment. (First value is always the default).')
+    }
+
     stages {
+
+        stage('env validation'){
+            steps{
+                script{
+                    if (params.environment_params != "prod"){
+                        echo "deployment cancelled"
+                        echo "deployment cant be done in sandbox and QA"
+                        currentBuild.result = 'SUCCESS'
+                        error("Stopping pipeline — non-prod deployment is not allowed.")
+                    }
+                    else{
+                        echo "Deployment is continuing"
+                    }
+                }
+            }
+        }
 
         /* ---------------------------
              BUILD BACKEND IMAGE
@@ -97,6 +118,9 @@ spec:
              DEPLOY USING HELM
         ---------------------------- */
         stage('Deploy to Kubernetes via Helm backend') {
+            when{
+               expression{ params.environment_params == "prod"}
+            }
             steps {
                 container('tools') {
                     dir('backend_fastapi') {
