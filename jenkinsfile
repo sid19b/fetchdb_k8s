@@ -51,9 +51,23 @@ spec:
                         echo "deployment cant be done in sandbox and QA"
                         currentBuild.result = 'SUCCESS'
                         error("Stopping pipeline — non-prod deployment is not allowed.")
+                        return    // gracefully stop whole pipeline
                     }
                     else{
                         echo "Deployment is continuing"
+                    }
+                }
+            }
+        }
+
+        /*Approval for prod deployment*/
+
+        stage('Approval for Production Deployment') {
+            when { expression { params.environment_params == 'prod' } }
+            steps {
+                script {
+                    timeout(time:5, unit:'MINUTES') {
+                        input message: "Are you sure you want to deploy to PROD?", ok: "Deploy"
                     }
                 }
             }
